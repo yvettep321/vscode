@@ -385,6 +385,7 @@ export class Workbench extends Layout {
 
 		// Register Commands
 		registerNotificationCommands(notificationsCenter, notificationsToasts);
+		notificationService.registerCommand();
 	}
 
 	private async restoreWorkbench(
