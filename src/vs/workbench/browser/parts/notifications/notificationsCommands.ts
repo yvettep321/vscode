@@ -11,6 +11,7 @@ import { INotificationViewItem, isNotificationViewItem } from 'vs/workbench/comm
 import { MenuRegistry, MenuId } from 'vs/platform/actions/common/actions';
 import { localize } from 'vs/nls';
 import { IListService, WorkbenchList } from 'vs/platform/list/browser/listService';
+import { NotificationService } from 'vs/workbench/services/notification/common/notificationService';
 
 // Center
 export const SHOW_NOTIFICATIONS_CENTER = 'notifications.showList';
@@ -31,6 +32,7 @@ export const EXPAND_NOTIFICATION = 'notification.expand';
 const TOGGLE_NOTIFICATION = 'notification.toggle';
 export const CLEAR_NOTIFICATION = 'notification.clear';
 export const CLEAR_ALL_NOTIFICATIONS = 'notifications.clearAll';
+const MANAGE_DISMISSED_NOTIFICATIONS = 'notifications.manageDismissedNotifications';
 
 export const NotificationFocusedContext = new RawContextKey<boolean>('notificationFocus', true);
 export const NotificationsCenterVisibleContext = new RawContextKey<boolean>('notificationCenterVisible', false);
@@ -55,7 +57,7 @@ export interface INotificationsToastController {
 	hide(): void;
 }
 
-export function registerNotificationCommands(center: INotificationsCenterController, toasts: INotificationsToastController): void {
+export function registerNotificationCommands(center: INotificationsCenterController, toasts: INotificationsToastController, notificationService: NotificationService): void {
 
 	function getNotificationFromContext(listService: IListService, context?: unknown): INotificationViewItem | undefined {
 		if (isNotificationViewItem(context)) {
@@ -227,10 +229,16 @@ export function registerNotificationCommands(center: INotificationsCenterControl
 	/// Clear All Notifications
 	CommandsRegistry.registerCommand(CLEAR_ALL_NOTIFICATIONS, () => center.clearAll());
 
+	// Manage Dismissed Notifications
+	CommandsRegistry.registerCommand(MANAGE_DISMISSED_NOTIFICATIONS, accessor => {
+		notificationService.manageDismissedNotifications(accessor);
+	});
+
 	// Commands for Command Palette
 	const category = { value: localize('notifications', "Notifications"), original: 'Notifications' };
 	MenuRegistry.appendMenuItem(MenuId.CommandPalette, { command: { id: SHOW_NOTIFICATIONS_CENTER, title: { value: localize('showNotifications', "Show Notifications"), original: 'Show Notifications' }, category } });
 	MenuRegistry.appendMenuItem(MenuId.CommandPalette, { command: { id: HIDE_NOTIFICATIONS_CENTER, title: { value: localize('hideNotifications', "Hide Notifications"), original: 'Hide Notifications' }, category }, when: NotificationsCenterVisibleContext });
 	MenuRegistry.appendMenuItem(MenuId.CommandPalette, { command: { id: CLEAR_ALL_NOTIFICATIONS, title: { value: localize('clearAllNotifications', "Clear All Notifications"), original: 'Clear All Notifications' }, category } });
 	MenuRegistry.appendMenuItem(MenuId.CommandPalette, { command: { id: FOCUS_NOTIFICATION_TOAST, title: { value: localize('focusNotificationToasts', "Focus Notification Toast"), original: 'Focus Notification Toast' }, category }, when: NotificationsToastsVisibleContext });
+	MenuRegistry.appendMenuItem(MenuId.CommandPalette, { command: { id: MANAGE_DISMISSED_NOTIFICATIONS, title: { value: localize('manageDismissedNotifications', "Manage Dismissed Notifications"), original: 'Manage Dismissed Notifications' }, category } });
 }

@@ -11,10 +11,9 @@ import { Event } from 'vs/base/common/event';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { IAction, Action } from 'vs/base/common/actions';
 import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
-import { CommandsRegistry } from 'vs/platform/commands/common/commands';
 import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
 import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
-const MANAGE_DISMISSED_NOTIFICATIONS = 'notifications.manageDismissedNotifications';
+
 export class NotificationService extends Disposable implements INotificationService {
 
 	declare readonly _serviceBrand: undefined;
@@ -26,48 +25,6 @@ export class NotificationService extends Disposable implements INotificationServ
 	) {
 		super();
 	}
-
-	registerCommand(): void {
-		CommandsRegistry.registerCommand(MANAGE_DISMISSED_NOTIFICATIONS, accessor => {
-			this.manageDismissedNotifications(accessor);
-		});
-	}
-
-	manageDismissedNotifications(accessor: ServicesAccessor): void {
-		const dismissedNotifications = this.getDismissedNotifications();
-
-		if (dismissedNotifications.length > 0) {
-			const quickPick = accessor.get(IQuickInputService).createQuickPick<{ label: string, description: string }>();
-			quickPick.canSelectMany = true;
-			const items = dismissedNotifications.map(n => {
-				return {
-					label: n,
-					description: n
-				};
-			});
-
-			quickPick.items = items;
-			quickPick.selectedItems = items;
-			quickPick.title = nls.localize('manageDismissedNotifications', "Manage Dismissed Notifications");
-			quickPick.placeholder = nls.localize('manageNotifications', "Choose which notifications will be shown again");
-
-			quickPick.onDidAccept(() => {
-				const updatedList = quickPick.selectedItems.map(item => item.label);
-				this.storageService.store(`dismissedNotifications`, JSON.stringify(updatedList), StorageScope.GLOBAL, StorageTarget.USER);
-
-				quickPick.dispose();
-			});
-
-			quickPick.onDidHide(() => {
-				quickPick.dispose();
-			});
-
-			quickPick.show();
-		} else {
-			this.storageService.store('dismissedNotifications', JSON.stringify(['hi']), StorageScope.GLOBAL, StorageTarget.USER);
-		}
-	}
-
 
 	setFilter(filter: NotificationsFilter): void {
 		this.model.setFilter(filter);
@@ -158,12 +115,6 @@ export class NotificationService extends Disposable implements INotificationServ
 		return handle;
 	}
 
-	getDismissedNotifications(): string[] {
-		const dismissedNotifications = this.storageService.get('dismissedNotifications', StorageScope.GLOBAL);
-		const notifications = dismissedNotifications ? JSON.parse(dismissedNotifications) : [];
-		return notifications;
-	}
-
 	prompt(severity: Severity, message: string, choices: IPromptChoice[], options?: IPromptOptions): INotificationHandle {
 		const toDispose = new DisposableStore();
 
@@ -240,5 +191,47 @@ export class NotificationService extends Disposable implements INotificationServ
 	status(message: NotificationMessage, options?: IStatusMessageOptions): IDisposable {
 		return this.model.showStatusMessage(message, options);
 	}
+
+	getDismissedNotifications(): string[] {
+		const dismissedNotifications = this.storageService.get('dismissedNotifications', StorageScope.GLOBAL);
+		return dismissedNotifications ? JSON.parse(dismissedNotifications) : [];
+	}
+
+	manageDismissedNotifications(accessor: ServicesAccessor): void {
+		const dismissedNotifications = this.getDismissedNotifications();
+
+		if (dismissedNotifications.length > 0) {
+			const quickPick = accessor.get(IQuickInputService).createQuickPick<{ label: string, description: string }>();
+			quickPick.canSelectMany = true;
+			const items = dismissedNotifications.map(n => {
+				return {
+					label: n,
+					description: n
+				};
+			});
+
+			quickPick.items = items;
+			quickPick.selectedItems = items;
+			quickPick.title = nls.localize('manageDismissedNotifications', "Manage Dismissed Notifications");
+			quickPick.placeholder = nls.localize('manageNotifications', "Choose which notifications can be shown again");
+
+			quickPick.onDidAccept(() => {
+				const updatedList = quickPick.selectedItems.map(item => item.label);
+				this.storageService.store(`dismissedNotifications`, JSON.stringify(updatedList), StorageScope.GLOBAL, StorageTarget.USER);
+
+				quickPick.dispose();
+			});
+
+			quickPick.onDidHide(() => {
+				quickPick.dispose();
+			});
+
+			quickPick.show();
+		} else {
+			// for testing - TODO: replace with log or prompt saying there are no dismissed notifications
+			this.storageService.store('dismissedNotifications', JSON.stringify(['hi']), StorageScope.GLOBAL, StorageTarget.USER);
+		}
+	}
 }
+
 registerSingleton(INotificationService, NotificationService, true);
