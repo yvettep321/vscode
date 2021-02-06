@@ -18,7 +18,6 @@ import { MainThreadTelemetryShape, IInitData } from 'vs/workbench/api/common/ext
 import { toErrorMessage } from 'vs/base/common/errorMessage';
 import { ExtHostExtensionService } from 'vs/workbench/api/node/extHostExtensionService';
 import { URI } from 'vs/base/common/uri';
-import { promisify } from 'util';
 import { ILogService } from 'vs/platform/log/common/log';
 import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
 
@@ -397,7 +396,7 @@ function tlsPatches(originals: typeof tls) {
 	};
 
 	function patch(original: typeof tls.createSecureContext): typeof tls.createSecureContext {
-		return function (details: tls.SecureContextOptions): ReturnType<typeof tls.createSecureContext> {
+		return function (details?: tls.SecureContextOptions): ReturnType<typeof tls.createSecureContext> {
 			const context = original.apply(null, arguments as any);
 			const certs = (details as any)._vscodeAdditionalCaCerts;
 			if (certs) {
@@ -416,7 +415,7 @@ function configureModuleLoading(extensionService: ExtHostExtensionService, looku
 		.then(extensionPaths => {
 			const node_module = <any>require.__$__nodeRequire('module');
 			const original = node_module._load;
-			node_module._load = function load(request: string, parent: any, isMain: any) {
+			node_module._load = function load(request: string, parent: { filename: string; }, isMain: boolean) {
 				if (request === 'tls') {
 					return lookup.tls;
 				}
@@ -540,7 +539,7 @@ const linuxCaCertificatePaths = [
 async function readLinuxCaCertificates() {
 	for (const certPath of linuxCaCertificatePaths) {
 		try {
-			const content = await promisify(fs.readFile)(certPath, { encoding: 'utf8' });
+			const content = await fs.promises.readFile(certPath, { encoding: 'utf8' });
 			const certs = new Set(content.split(/(?=-----BEGIN CERTIFICATE-----)/g)
 				.filter(pem => !!pem.length));
 			return {

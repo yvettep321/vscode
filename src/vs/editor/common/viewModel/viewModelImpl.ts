@@ -916,8 +916,8 @@ export class ViewModel extends Disposable implements IViewModel {
 	public getPosition(): Position {
 		return this._cursor.getPrimaryCursorState().modelState.position;
 	}
-	public setSelections(source: string | null | undefined, selections: readonly ISelection[]): void {
-		this._withViewEventsCollector(eventsCollector => this._cursor.setSelections(eventsCollector, source, selections));
+	public setSelections(source: string | null | undefined, selections: readonly ISelection[], reason = CursorChangeReason.NotSet): void {
+		this._withViewEventsCollector(eventsCollector => this._cursor.setSelections(eventsCollector, source, selections, reason));
 	}
 	public saveCursorState(): ICursorState[] {
 		return this._cursor.saveState();
@@ -948,8 +948,8 @@ export class ViewModel extends Disposable implements IViewModel {
 	public type(text: string, source?: string | null | undefined): void {
 		this._executeCursorEdit(eventsCollector => this._cursor.type(eventsCollector, text, source));
 	}
-	public replacePreviousChar(text: string, replaceCharCnt: number, source?: string | null | undefined): void {
-		this._executeCursorEdit(eventsCollector => this._cursor.replacePreviousChar(eventsCollector, text, replaceCharCnt, source));
+	public compositionType(text: string, replacePrevCharCnt: number, replaceNextCharCnt: number, positionDelta: number, source?: string | null | undefined): void {
+		this._executeCursorEdit(eventsCollector => this._cursor.compositionType(eventsCollector, text, replacePrevCharCnt, replaceNextCharCnt, positionDelta, source));
 	}
 	public paste(text: string, pasteOnNewLine: boolean, multicursorText?: string[] | null | undefined, source?: string | null | undefined): void {
 		this._executeCursorEdit(eventsCollector => this._cursor.paste(eventsCollector, text, pasteOnNewLine, multicursorText, source));
