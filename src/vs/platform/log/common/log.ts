@@ -50,16 +50,16 @@ export interface ILogger extends IDisposable {
 }
 
 export interface ILogService extends ILogger {
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 }
 
 export interface ILoggerService {
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 
 	getLogger(file: URI): ILogger;
 }
 
-export abstract class AbstractLogService extends Disposable {
+export abstract class AbstractLogger extends Disposable {
 
 	private level: LogLevel = DEFAULT_LOG_LEVEL;
 	private readonly _onDidChangeLogLevel: Emitter<LogLevel> = this._register(new Emitter<LogLevel>());
@@ -78,9 +78,8 @@ export abstract class AbstractLogService extends Disposable {
 
 }
 
-export class ConsoleLogMainService extends AbstractLogService implements ILogService {
+export class ConsoleMainLogger extends AbstractLogger implements ILogger {
 
-	_serviceBrand: undefined;
 	private useColors: boolean;
 
 	constructor(logLevel: LogLevel = DEFAULT_LOG_LEVEL) {
@@ -159,9 +158,7 @@ export class ConsoleLogMainService extends AbstractLogService implements ILogSer
 
 }
 
-export class ConsoleLogService extends AbstractLogService implements ILogService {
-
-	_serviceBrand: undefined;
+export class ConsoleLogger extends AbstractLogger implements ILogger {
 
 	constructor(logLevel: LogLevel = DEFAULT_LOG_LEVEL) {
 		super();
@@ -213,49 +210,55 @@ export class ConsoleLogService extends AbstractLogService implements ILogService
 	}
 }
 
-export class ConsoleLogInMainService extends AbstractLogService implements ILogService {
+export class AdapterLogger extends AbstractLogger implements ILogger {
 
-	_serviceBrand: undefined;
-
-	constructor(private readonly client: LoggerChannelClient, logLevel: LogLevel = DEFAULT_LOG_LEVEL) {
+	constructor(private readonly adapter: { log: (type: string, args: any[]) => void }, logLevel: LogLevel = DEFAULT_LOG_LEVEL) {
 		super();
 		this.setLevel(logLevel);
 	}
 
 	trace(message: string, ...args: any[]): void {
 		if (this.getLevel() <= LogLevel.Trace) {
-			this.client.consoleLog('trace', [message, ...args]);
+			this.adapter.log('trace', [this.extractMessage(message), ...args]);
 		}
 	}
 
 	debug(message: string, ...args: any[]): void {
 		if (this.getLevel() <= LogLevel.Debug) {
-			this.client.consoleLog('debug', [message, ...args]);
+			this.adapter.log('debug', [this.extractMessage(message), ...args]);
 		}
 	}
 
 	info(message: string, ...args: any[]): void {
 		if (this.getLevel() <= LogLevel.Info) {
-			this.client.consoleLog('info', [message, ...args]);
+			this.adapter.log('info', [this.extractMessage(message), ...args]);
 		}
 	}
 
 	warn(message: string | Error, ...args: any[]): void {
 		if (this.getLevel() <= LogLevel.Warning) {
-			this.client.consoleLog('warn', [message, ...args]);
+			this.adapter.log('warn', [this.extractMessage(message), ...args]);
 		}
 	}
 
 	error(message: string | Error, ...args: any[]): void {
 		if (this.getLevel() <= LogLevel.Error) {
-			this.client.consoleLog('error', [toErrorMessage(message, this.getLevel() <= LogLevel.Trace), ...args]);
+			this.adapter.log('error', [this.extractMessage(message), ...args]);
 		}
 	}
 
 	critical(message: string | Error, ...args: any[]): void {
 		if (this.getLevel() <= LogLevel.Critical) {
-			this.client.consoleLog('critical', [toErrorMessage(message, this.getLevel() <= LogLevel.Trace), ...args]);
+			this.adapter.log('critical', [this.extractMessage(message), ...args]);
 		}
+	}
+
+	private extractMessage(msg: string | Error): string {
+		if (typeof msg === 'string') {
+			return msg;
+		}
+
+		return toErrorMessage(msg, this.getLevel() <= LogLevel.Trace);
 	}
 
 	dispose(): void {
@@ -267,10 +270,17 @@ export class ConsoleLogInMainService extends AbstractLogService implements ILogS
 	}
 }
 
-export class MultiplexLogService extends AbstractLogService implements ILogService {
-	_serviceBrand: undefined;
+export class ConsoleLogInMainService extends AdapterLogger implements ILogger {
 
-	constructor(private readonly logServices: ReadonlyArray<ILogService>) {
+	constructor(client: LoggerChannelClient, logLevel: LogLevel = DEFAULT_LOG_LEVEL) {
+		super({ log: (type, args) => client.consoleLog(type, args) }, logLevel);
+	}
+}
+
+export class MultiplexLogService extends AbstractLogger implements ILogService {
+	declare readonly _serviceBrand: undefined;
+
+	constructor(private readonly logServices: ReadonlyArray<ILogger>) {
 		super();
 		if (logServices.length) {
 			this.setLevel(logServices[0].getLevel());
@@ -333,57 +343,57 @@ export class MultiplexLogService extends AbstractLogService implements ILogServi
 	}
 }
 
-export class DelegatedLogService extends Disposable implements ILogService {
-	_serviceBrand: undefined;
+export class LogService extends Disposable implements ILogService {
+	declare readonly _serviceBrand: undefined;
 
-	constructor(private logService: ILogService) {
+	constructor(private logger: ILogger) {
 		super();
-		this._register(logService);
+		this._register(logger);
 	}
 
 	get onDidChangeLogLevel(): Event<LogLevel> {
-		return this.logService.onDidChangeLogLevel;
+		return this.logger.onDidChangeLogLevel;
 	}
 
 	setLevel(level: LogLevel): void {
-		this.logService.setLevel(level);
+		this.logger.setLevel(level);
 	}
 
 	getLevel(): LogLevel {
-		return this.logService.getLevel();
+		return this.logger.getLevel();
 	}
 
 	trace(message: string, ...args: any[]): void {
-		this.logService.trace(message, ...args);
+		this.logger.trace(message, ...args);
 	}
 
 	debug(message: string, ...args: any[]): void {
-		this.logService.debug(message, ...args);
+		this.logger.debug(message, ...args);
 	}
 
 	info(message: string, ...args: any[]): void {
-		this.logService.info(message, ...args);
+		this.logger.info(message, ...args);
 	}
 
 	warn(message: string, ...args: any[]): void {
-		this.logService.warn(message, ...args);
+		this.logger.warn(message, ...args);
 	}
 
 	error(message: string | Error, ...args: any[]): void {
-		this.logService.error(message, ...args);
+		this.logger.error(message, ...args);
 	}
 
 	critical(message: string | Error, ...args: any[]): void {
-		this.logService.critical(message, ...args);
+		this.logger.critical(message, ...args);
 	}
 
 	flush(): void {
-		this.logService.flush();
+		this.logger.flush();
 	}
 }
 
 export class NullLogService implements ILogService {
-	_serviceBrand: undefined;
+	declare readonly _serviceBrand: undefined;
 	readonly onDidChangeLogLevel: Event<LogLevel> = new Emitter<LogLevel>().event;
 	setLevel(level: LogLevel): void { }
 	getLevel(): LogLevel { return LogLevel.Info; }
@@ -401,24 +411,44 @@ export function getLogLevel(environmentService: IEnvironmentService): LogLevel {
 	if (environmentService.verbose) {
 		return LogLevel.Trace;
 	}
-	if (typeof environmentService.args.log === 'string') {
-		const logLevel = environmentService.args.log.toLowerCase();
-		switch (logLevel) {
-			case 'trace':
-				return LogLevel.Trace;
-			case 'debug':
-				return LogLevel.Debug;
-			case 'info':
-				return LogLevel.Info;
-			case 'warn':
-				return LogLevel.Warning;
-			case 'error':
-				return LogLevel.Error;
-			case 'critical':
-				return LogLevel.Critical;
-			case 'off':
-				return LogLevel.Off;
+	if (typeof environmentService.logLevel === 'string') {
+		const logLevel = parseLogLevel(environmentService.logLevel.toLowerCase());
+		if (logLevel !== undefined) {
+			return logLevel;
 		}
 	}
 	return DEFAULT_LOG_LEVEL;
 }
+
+export function parseLogLevel(logLevel: string): LogLevel | undefined {
+	switch (logLevel) {
+		case 'trace':
+			return LogLevel.Trace;
+		case 'debug':
+			return LogLevel.Debug;
+		case 'info':
+			return LogLevel.Info;
+		case 'warn':
+			return LogLevel.Warning;
+		case 'error':
+			return LogLevel.Error;
+		case 'critical':
+			return LogLevel.Critical;
+		case 'off':
+			return LogLevel.Off;
+	}
+	return undefined;
+}
+
+export function LogLevelToString(logLevel: LogLevel): string {
+	switch (logLevel) {
+		case LogLevel.Trace: return 'trace';
+		case LogLevel.Debug: return 'debug';
+		case LogLevel.Info: return 'info';
+		case LogLevel.Warning: return 'warn';
+		case LogLevel.Error: return 'error';
+		case LogLevel.Critical: return 'critical';
+		case LogLevel.Off: return 'off';
+	}
+}
+

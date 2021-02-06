@@ -5,13 +5,13 @@
 
 import * as nls from 'vs/nls';
 import { onUnexpectedError } from 'vs/base/common/errors';
-import { dispose, DisposableStore } from 'vs/base/common/lifecycle';
+import { DisposableStore } from 'vs/base/common/lifecycle';
 import { ICodeEditorService } from 'vs/editor/browser/services/codeEditorService';
 import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 import { IContextKey, IContextKeyService, RawContextKey, ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IStorageService, StorageScope } from 'vs/platform/storage/common/storage';
-import * as editorCommon from 'vs/editor/common/editorCommon';
+import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
+import { IEditorContribution } from 'vs/editor/common/editorCommon';
 import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
 import { ReferencesModel, OneReference } from '../referencesModel';
 import { ReferenceWidget, LayoutData } from './referencesWidget';
@@ -25,10 +25,11 @@ import { IListService, WorkbenchListFocusContextKey } from 'vs/platform/list/bro
 import { KeybindingsRegistry, KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
 import { KeyCode, KeyMod, KeyChord } from 'vs/base/common/keyCodes';
 import { CommandsRegistry } from 'vs/platform/commands/common/commands';
+import { EditorOption } from 'vs/editor/common/config/editorOptions';
 
 export const ctxReferenceSearchVisible = new RawContextKey<boolean>('referenceSearchVisible', false);
 
-export abstract class ReferencesController implements editorCommon.IEditorContribution {
+export abstract class ReferencesController implements IEditorContribution {
 
 	static readonly ID = 'editor.contrib.referencesController';
 
@@ -63,8 +64,8 @@ export abstract class ReferencesController implements editorCommon.IEditorContri
 	dispose(): void {
 		this._referenceSearchVisible.reset();
 		this._disposables.dispose();
-		dispose(this._widget);
-		dispose(this._model);
+		this._widget?.dispose();
+		this._model?.dispose();
 		this._widget = undefined;
 		this._model = undefined;
 	}
@@ -100,7 +101,7 @@ export abstract class ReferencesController implements editorCommon.IEditorContri
 		this._disposables.add(this._widget.onDidClose(() => {
 			modelPromise.cancel();
 			if (this._widget) {
-				this._storageService.store(storageKey, JSON.stringify(this._widget.layoutData), StorageScope.GLOBAL);
+				this._storageService.store(storageKey, JSON.stringify(this._widget.layoutData), StorageScope.GLOBAL, StorageTarget.MACHINE);
 				this._widget = undefined;
 			}
 			this.closeWidget();
@@ -116,17 +117,17 @@ export abstract class ReferencesController implements editorCommon.IEditorContri
 					if (event.source !== 'editor' || !this._configurationService.getValue('editor.stablePeek')) {
 						// when stable peek is configured we don't close
 						// the peek window on selecting the editor
-						this.openReference(element, false);
+						this.openReference(element, false, false);
 					}
 					break;
 				case 'side':
-					this.openReference(element, true);
+					this.openReference(element, true, false);
 					break;
 				case 'goto':
 					if (peekMode) {
 						this._gotoReference(element);
 					} else {
-						this.openReference(element, false);
+						this.openReference(element, false, true);
 					}
 					break;
 			}
@@ -163,7 +164,11 @@ export abstract class ReferencesController implements editorCommon.IEditorContri
 					let pos = new Position(range.startLineNumber, range.startColumn);
 					let selection = this._model.nearestReference(uri, pos);
 					if (selection) {
-						return this._widget.setSelection(selection);
+						return this._widget.setSelection(selection).then(() => {
+							if (this._widget && this._editor.getOption(EditorOption.peekWidgetDefaultFocus) === 'editor') {
+								this._widget.focusOnPreviewEditor();
+							}
+						});
 					}
 				}
 				return undefined;
@@ -201,21 +206,35 @@ export abstract class ReferencesController implements editorCommon.IEditorContri
 		}
 		const target = this._model.nextOrPreviousReference(source, fwd);
 		const editorFocus = this._editor.hasTextFocus();
+		const previewEditorFocus = this._widget.isPreviewEditorFocused();
 		await this._widget.setSelection(target);
 		await this._gotoReference(target);
 		if (editorFocus) {
 			this._editor.focus();
+		} else if (this._widget && previewEditorFocus) {
+			this._widget.focusOnPreviewEditor();
 		}
 	}
 
-	closeWidget(): void {
+	async revealReference(reference: OneReference): Promise<void> {
+		if (!this._editor.hasModel() || !this._model || !this._widget) {
+			// can be called while still resolving...
+			return;
+		}
+
+		await this._widget.revealReference(reference);
+	}
+
+	closeWidget(focusEditor = true): void {
+		this._widget?.dispose();
+		this._model?.dispose();
 		this._referenceSearchVisible.reset();
 		this._disposables.clear();
-		dispose(this._widget);
-		dispose(this._model);
 		this._widget = undefined;
 		this._model = undefined;
-		this._editor.focus();
+		if (focusEditor) {
+			this._editor.focus();
+		}
 		this._requestIdPool += 1; // Cancel pending requests
 	}
 
@@ -266,7 +285,7 @@ export abstract class ReferencesController implements editorCommon.IEditorContri
 		});
 	}
 
-	openReference(ref: Location, sideBySide: boolean): void {
+	openReference(ref: Location, sideBySide: boolean, pinned: boolean): void {
 		// clear stage
 		if (!sideBySide) {
 			this.closeWidget();
@@ -275,7 +294,7 @@ export abstract class ReferencesController implements editorCommon.IEditorContri
 		const { uri, range } = ref;
 		this._editorService.openCodeEditor({
 			resource: uri,
-			options: { selection: range }
+			options: { selection: range, pinned }
 		}, this._editor, sideBySide);
 	}
 }
@@ -292,8 +311,8 @@ function withController(accessor: ServicesAccessor, fn: (controller: ReferencesC
 }
 
 KeybindingsRegistry.registerCommandAndKeybindingRule({
-	id: 'changePeekFocus',
-	weight: KeybindingWeight.WorkbenchContrib + 50,
+	id: 'togglePeekWidgetFocus',
+	weight: KeybindingWeight.EditorContrib,
 	primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.F2),
 	when: ContextKeyExpr.or(ctxReferenceSearchVisible, PeekContext.inPeekEditor),
 	handler(accessor) {
@@ -305,7 +324,7 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 
 KeybindingsRegistry.registerCommandAndKeybindingRule({
 	id: 'goToNextReference',
-	weight: KeybindingWeight.WorkbenchContrib + 50,
+	weight: KeybindingWeight.EditorContrib - 10,
 	primary: KeyCode.F4,
 	secondary: [KeyCode.F12],
 	when: ContextKeyExpr.or(ctxReferenceSearchVisible, PeekContext.inPeekEditor),
@@ -318,7 +337,7 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 
 KeybindingsRegistry.registerCommandAndKeybindingRule({
 	id: 'goToPreviousReference',
-	weight: KeybindingWeight.WorkbenchContrib + 50,
+	weight: KeybindingWeight.EditorContrib - 10,
 	primary: KeyMod.Shift | KeyCode.F4,
 	secondary: [KeyMod.Shift | KeyCode.F12],
 	when: ContextKeyExpr.or(ctxReferenceSearchVisible, PeekContext.inPeekEditor),
@@ -329,24 +348,49 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 	}
 });
 
-KeybindingsRegistry.registerCommandAndKeybindingRule({
+// commands that aren't needed anymore because there is now ContextKeyExpr.OR
+CommandsRegistry.registerCommandAlias('goToNextReferenceFromEmbeddedEditor', 'goToNextReference');
+CommandsRegistry.registerCommandAlias('goToPreviousReferenceFromEmbeddedEditor', 'goToPreviousReference');
+
+// close
+CommandsRegistry.registerCommandAlias('closeReferenceSearchEditor', 'closeReferenceSearch');
+CommandsRegistry.registerCommand(
+	'closeReferenceSearch',
+	accessor => withController(accessor, controller => controller.closeWidget())
+);
+KeybindingsRegistry.registerKeybindingRule({
 	id: 'closeReferenceSearch',
 	weight: KeybindingWeight.EditorContrib - 101,
 	primary: KeyCode.Escape,
 	secondary: [KeyMod.Shift | KeyCode.Escape],
-	when: ContextKeyExpr.or(
-		ContextKeyExpr.and(ctxReferenceSearchVisible, ContextKeyExpr.not('config.editor.stablePeek')),
-		ContextKeyExpr.and(PeekContext.inPeekEditor, ContextKeyExpr.not('config.editor.stablePeek'))
-	),
-	handler(accessor: ServicesAccessor) {
-		withController(accessor, controller => controller.closeWidget());
-	}
+	when: ContextKeyExpr.and(PeekContext.inPeekEditor, ContextKeyExpr.not('config.editor.stablePeek'))
+});
+KeybindingsRegistry.registerKeybindingRule({
+	id: 'closeReferenceSearch',
+	weight: KeybindingWeight.WorkbenchContrib + 50,
+	primary: KeyCode.Escape,
+	secondary: [KeyMod.Shift | KeyCode.Escape],
+	when: ContextKeyExpr.and(ctxReferenceSearchVisible, ContextKeyExpr.not('config.editor.stablePeek'))
 });
 
-// commands that aren't needed anymore because there is now ContextKeyExpr.OR
-CommandsRegistry.registerCommandAlias('goToNextReferenceFromEmbeddedEditor', 'goToNextReference');
-CommandsRegistry.registerCommandAlias('goToPreviousReferenceFromEmbeddedEditor', 'goToPreviousReference');
-CommandsRegistry.registerCommandAlias('closeReferenceSearchEditor', 'closeReferenceSearch');
+
+KeybindingsRegistry.registerCommandAndKeybindingRule({
+	id: 'revealReference',
+	weight: KeybindingWeight.WorkbenchContrib,
+	primary: KeyCode.Enter,
+	mac: {
+		primary: KeyCode.Enter,
+		secondary: [KeyMod.CtrlCmd | KeyCode.DownArrow]
+	},
+	when: ContextKeyExpr.and(ctxReferenceSearchVisible, WorkbenchListFocusContextKey),
+	handler(accessor: ServicesAccessor) {
+		const listService = accessor.get(IListService);
+		const focus = <any[]>listService.lastFocusedList?.getFocus();
+		if (Array.isArray(focus) && focus[0] instanceof OneReference) {
+			withController(accessor, controller => controller.revealReference(focus[0]));
+		}
+	}
+});
 
 KeybindingsRegistry.registerCommandAndKeybindingRule({
 	id: 'openReferenceToSide',
@@ -360,7 +404,7 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 		const listService = accessor.get(IListService);
 		const focus = <any[]>listService.lastFocusedList?.getFocus();
 		if (Array.isArray(focus) && focus[0] instanceof OneReference) {
-			withController(accessor, controller => controller.openReference(focus[0], true));
+			withController(accessor, controller => controller.openReference(focus[0], true, true));
 		}
 	}
 });
@@ -369,6 +413,6 @@ CommandsRegistry.registerCommand('openReference', (accessor) => {
 	const listService = accessor.get(IListService);
 	const focus = <any[]>listService.lastFocusedList?.getFocus();
 	if (Array.isArray(focus) && focus[0] instanceof OneReference) {
-		withController(accessor, controller => controller.openReference(focus[0], false));
+		withController(accessor, controller => controller.openReference(focus[0], false, true));
 	}
 });

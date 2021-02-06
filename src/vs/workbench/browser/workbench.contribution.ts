@@ -8,21 +8,7 @@ import * as nls from 'vs/nls';
 import { IConfigurationRegistry, Extensions as ConfigurationExtensions, ConfigurationScope } from 'vs/platform/configuration/common/configurationRegistry';
 import { isMacintosh, isWindows, isLinux, isWeb, isNative } from 'vs/base/common/platform';
 import { workbenchConfigurationNodeBase } from 'vs/workbench/common/configuration';
-import { PanelRegistry, Extensions as PanelExtensions, PanelDescriptor, PaneCompositePanel } from 'vs/workbench/browser/panel';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { IStorageService } from 'vs/platform/storage/common/storage';
-import { ViewContainer, IViewContainersRegistry, Extensions as ViewContainerExtensions, ViewContainerLocation } from 'vs/workbench/common/views';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { IThemeService } from 'vs/platform/theme/common/themeService';
-import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
-import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { Viewlet, ViewletDescriptor, ViewletRegistry, Extensions as ViewletExtensions } from 'vs/workbench/browser/viewlet';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IWorkbenchLayoutService } from 'vs/workbench/services/layout/browser/layoutService';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { isString } from 'vs/base/common/types';
-import { URI } from 'vs/base/common/uri';
+import { isStandalone } from 'vs/base/browser/browser';
 
 // Configuration
 (function registerConfiguration(): void {
@@ -32,14 +18,44 @@ import { URI } from 'vs/base/common/uri';
 	registry.registerConfiguration({
 		...workbenchConfigurationNodeBase,
 		'properties': {
+			'workbench.editor.titleScrollbarSizing': {
+				type: 'string',
+				enum: ['default', 'large'],
+				enumDescriptions: [
+					nls.localize('workbench.editor.titleScrollbarSizing.default', "The default size."),
+					nls.localize('workbench.editor.titleScrollbarSizing.large', "Increases the size, so it can be grabbed more easily with the mouse")
+				],
+				description: nls.localize('tabScrollbarHeight', "Controls the height of the scrollbars used for tabs and breadcrumbs in the editor title area."),
+				default: 'default',
+			},
 			'workbench.editor.showTabs': {
 				'type': 'boolean',
 				'description': nls.localize('showEditorTabs', "Controls whether opened editors should show in tabs or not."),
 				'default': true
 			},
+			'workbench.editor.wrapTabs': {
+				'type': 'boolean',
+				'markdownDescription': nls.localize('wrapTabs', "Controls whether tabs should be wrapped over multiple lines when exceeding available space or whether a scrollbar should appear instead. This value is ignored when `#workbench.editor.showTabs#` is disabled."),
+				'default': false
+			},
+			'workbench.editor.scrollToSwitchTabs': {
+				'type': 'boolean',
+				'markdownDescription': nls.localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'scrollToSwitchTabs' }, "Controls whether scrolling over tabs will open them or not. By default tabs will only reveal upon scrolling, but not open. You can press and hold the Shift-key while scrolling to change this behaviour for that duration. This value is ignored when `#workbench.editor.showTabs#` is disabled."),
+				'default': false
+			},
 			'workbench.editor.highlightModifiedTabs': {
 				'type': 'boolean',
-				'description': nls.localize('highlightModifiedTabs', "Controls whether a top border is drawn on modified (dirty) editor tabs or not."),
+				'markdownDescription': nls.localize('highlightModifiedTabs', "Controls whether a top border is drawn on modified (dirty) editor tabs or not. This value is ignored when `#workbench.editor.showTabs#` is disabled."),
+				'default': false
+			},
+			'workbench.editor.decorations.badges': {
+				'type': 'boolean',
+				'markdownDescription': nls.localize('decorations.badges', "Controls whether editor file decorations should use badges."),
+				'default': false
+			},
+			'workbench.editor.decorations.colors': {
+				'type': 'boolean',
+				'markdownDescription': nls.localize('decorations.colors', "Controls whether editor file decorations should use colors."),
 				'default': false
 			},
 			'workbench.editor.labelFormat': {
@@ -57,11 +73,24 @@ import { URI } from 'vs/base/common/uri';
 					key: 'tabDescription'
 				}, "Controls the format of the label for an editor."),
 			},
+			'workbench.editor.untitled.labelFormat': {
+				'type': 'string',
+				'enum': ['content', 'name'],
+				'enumDescriptions': [
+					nls.localize('workbench.editor.untitled.labelFormat.content', "The name of the untitled file is derived from the contents of its first line unless it has an associated file path. It will fallback to the name in case the line is empty or contains no word characters."),
+					nls.localize('workbench.editor.untitled.labelFormat.name', "The name of the untitled file is not derived from the contents of the file."),
+				],
+				'default': 'content',
+				'description': nls.localize({
+					comment: ['This is the description for a setting. Values surrounded by parenthesis are not to be translated.'],
+					key: 'untitledLabelFormat'
+				}, "Controls the format of the label for an untitled editor."),
+			},
 			'workbench.editor.tabCloseButton': {
 				'type': 'string',
 				'enum': ['left', 'right', 'off'],
 				'default': 'right',
-				'description': nls.localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'editorTabCloseButton' }, "Controls the position of the editor's tabs close buttons, or disables them when set to 'off'.")
+				'markdownDescription': nls.localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'editorTabCloseButton' }, "Controls the position of the editor's tabs close buttons, or disables them when set to 'off'. This value is ignored when `#workbench.editor.showTabs#` is disabled.")
 			},
 			'workbench.editor.tabSizing': {
 				'type': 'string',
@@ -71,7 +100,18 @@ import { URI } from 'vs/base/common/uri';
 					nls.localize('workbench.editor.tabSizing.fit', "Always keep tabs large enough to show the full editor label."),
 					nls.localize('workbench.editor.tabSizing.shrink', "Allow tabs to get smaller when the available space is not enough to show all tabs at once.")
 				],
-				'description': nls.localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'tabSizing' }, "Controls the sizing of editor tabs.")
+				'markdownDescription': nls.localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'tabSizing' }, "Controls the sizing of editor tabs. This value is ignored when `#workbench.editor.showTabs#` is disabled.")
+			},
+			'workbench.editor.pinnedTabSizing': {
+				'type': 'string',
+				'enum': ['normal', 'compact', 'shrink'],
+				'default': 'normal',
+				'enumDescriptions': [
+					nls.localize('workbench.editor.pinnedTabSizing.normal', "A pinned tab inherits the look of non pinned tabs."),
+					nls.localize('workbench.editor.pinnedTabSizing.compact', "A pinned tab will show in a compact form with only icon or first letter of the editor name."),
+					nls.localize('workbench.editor.pinnedTabSizing.shrink', "A pinned tab shrinks to a compact fixed size showing parts of the editor name.")
+				],
+				'markdownDescription': nls.localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'pinnedTabSizing' }, "Controls the sizing of pinned editor tabs. Pinned tabs are sorted to the beginning of all opened tabs and typically do not close until unpinned. This value is ignored when `#workbench.editor.showTabs#` is disabled.")
 			},
 			'workbench.editor.splitSizing': {
 				'type': 'string',
@@ -83,6 +123,11 @@ import { URI } from 'vs/base/common/uri';
 				],
 				'description': nls.localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'splitSizing' }, "Controls the sizing of editor groups when splitting them.")
 			},
+			'workbench.editor.splitOnDragAndDrop': {
+				'type': 'boolean',
+				'default': true,
+				'description': nls.localize('splitOnDragAndDrop', "Controls if editor groups can be split from drag and drop operations by dropping an editor or file on the edges of the editor area.")
+			},
 			'workbench.editor.focusRecentEditorAfterClose': {
 				'type': 'boolean',
 				'description': nls.localize('focusRecentEditorAfterClose', "Controls whether tabs are closed in most recently used order or from left to right."),
@@ -90,18 +135,23 @@ import { URI } from 'vs/base/common/uri';
 			},
 			'workbench.editor.showIcons': {
 				'type': 'boolean',
-				'description': nls.localize('showIcons', "Controls whether opened editors should show with an icon or not. This requires an icon theme to be enabled as well."),
+				'description': nls.localize('showIcons', "Controls whether opened editors should show with an icon or not. This requires a file icon theme to be enabled as well."),
 				'default': true
 			},
 			'workbench.editor.enablePreview': {
 				'type': 'boolean',
-				'description': nls.localize('enablePreview', "Controls whether opened editors show as preview. Preview editors are reused until they are pinned (e.g. via double click or editing) and show up with an italic font style."),
+				'description': nls.localize('enablePreview', "Controls whether opened editors show as preview. Preview editors do not keep open and are reused until explicitly set to be kept open (e.g. via double click or editing) and show up with an italic font style."),
 				'default': true
 			},
 			'workbench.editor.enablePreviewFromQuickOpen': {
 				'type': 'boolean',
-				'description': nls.localize('enablePreviewFromQuickOpen', "Controls whether editors opened from Quick Open show as preview. Preview editors are reused until they are pinned (e.g. via double click or editing)."),
-				'default': true
+				'markdownDescription': nls.localize('enablePreviewFromQuickOpen', "Controls whether editors opened from Quick Open show as preview. Preview editors do not keep open and are reused until explicitly set to be kept open (e.g. via double click or editing). This value is ignored when `#workbench.editor.enablePreview#` is disabled."),
+				'default': false
+			},
+			'workbench.editor.enablePreviewFromCodeNavigation': {
+				'type': 'boolean',
+				'markdownDescription': nls.localize('enablePreviewFromCodeNavigation', "Controls whether editors remain in preview when a code navigation is started from them. Preview editors do not keep open and are reused until explicitly set to be kept open (e.g. via double click or editing). This value is ignored when `#workbench.editor.enablePreview#` is disabled."),
+				'default': false
 			},
 			'workbench.editor.closeOnFileDelete': {
 				'type': 'boolean',
@@ -133,13 +183,13 @@ import { URI } from 'vs/base/common/uri';
 			'workbench.editor.mouseBackForwardToNavigate': {
 				'type': 'boolean',
 				'description': nls.localize('mouseBackForwardToNavigate', "Navigate between open files using mouse buttons four and five if provided."),
-				'default': true,
-				'included': !isMacintosh
+				'default': true
 			},
 			'workbench.editor.restoreViewState': {
 				'type': 'boolean',
-				'description': nls.localize('restoreViewState', "Restores the last view state (e.g. scroll position) when re-opening files after they have been closed."),
+				'description': nls.localize('restoreViewState', "Restores the last view state (e.g. scroll position) when re-opening textual editors after they have been closed."),
 				'default': true,
+				'scope': ConfigurationScope.LANGUAGE_OVERRIDABLE
 			},
 			'workbench.editor.centeredLayoutAutoResize': {
 				'type': 'boolean',
@@ -155,7 +205,7 @@ import { URI } from 'vs/base/common/uri';
 				'type': 'number',
 				'default': 10,
 				'exclusiveMinimum': 0,
-				'description': nls.localize('limitEditorsMaximum', "Controls the maximum number of opened editors. Use the `workbench.editor.limit.perEditorGroup` setting to control this limit per editor group or across all groups.")
+				'markdownDescription': nls.localize('limitEditorsMaximum', "Controls the maximum number of opened editors. Use the `#workbench.editor.limit.perEditorGroup#` setting to control this limit per editor group or across all groups.")
 			},
 			'workbench.editor.limit.perEditorGroup': {
 				'type': 'boolean',
@@ -201,13 +251,24 @@ import { URI } from 'vs/base/common/uri';
 				'type': 'string',
 				'enum': ['left', 'right'],
 				'default': 'left',
-				'description': nls.localize('sideBarLocation', "Controls the location of the sidebar. It can either show on the left or right of the workbench.")
+				'description': nls.localize('sideBarLocation', "Controls the location of the sidebar and activity bar. They can either show on the left or right of the workbench.")
 			},
 			'workbench.panel.defaultLocation': {
 				'type': 'string',
 				'enum': ['left', 'bottom', 'right'],
 				'default': 'bottom',
-				'description': nls.localize('panelDefaultLocation', "Controls the default location of the panel (terminal, debug console, output, problems). It can either show at the bottom or on the right of the workbench.")
+				'description': nls.localize('panelDefaultLocation', "Controls the default location of the panel (terminal, debug console, output, problems). It can either show at the bottom, right, or left of the workbench.")
+			},
+			'workbench.panel.opensMaximized': {
+				'type': 'string',
+				'enum': ['always', 'never', 'preserve'],
+				'default': 'preserve',
+				'description': nls.localize('panelOpensMaximized', "Controls whether the panel opens maximized. It can either always open maximized, never open maximized, or open to the last state it was in before being closed."),
+				'enumDescriptions': [
+					nls.localize('workbench.panel.opensMaximized.always', "Always maximize the panel when opening it."),
+					nls.localize('workbench.panel.opensMaximized.never', "Never maximize the panel when opening it. The panel will open un-maximized."),
+					nls.localize('workbench.panel.opensMaximized.preserve', "Open the panel to the state that it was in, before it was closed.")
+				]
 			},
 			'workbench.statusBar.visible': {
 				'type': 'boolean',
@@ -218,6 +279,16 @@ import { URI } from 'vs/base/common/uri';
 				'type': 'boolean',
 				'default': true,
 				'description': nls.localize('activityBarVisibility', "Controls the visibility of the activity bar in the workbench.")
+			},
+			'workbench.activityBar.iconClickBehavior': {
+				'type': 'string',
+				'enum': ['toggle', 'focus'],
+				'default': 'toggle',
+				'description': nls.localize('activityBarIconClickBehavior', "Controls the behavior of clicking an activity bar icon in the workbench."),
+				'enumDescriptions': [
+					nls.localize('workbench.activityBar.iconClickBehavior.toggle', "Hide the side bar if the clicked item is already visible."),
+					nls.localize('workbench.activityBar.iconClickBehavior.focus', "Focus side bar if the clicked item is already visible.")
+				]
 			},
 			'workbench.view.alwaysShowHeaderActions': {
 				'type': 'boolean',
@@ -264,8 +335,8 @@ import { URI } from 'vs/base/common/uri';
 		nls.localize('activeFolderLong', "`\${activeFolderLong}`: the full path of the folder the file is contained in (e.g. /Users/Development/myFolder/myFileFolder)."),
 		nls.localize('folderName', "`\${folderName}`: name of the workspace folder the file is contained in (e.g. myFolder)."),
 		nls.localize('folderPath', "`\${folderPath}`: file path of the workspace folder the file is contained in (e.g. /Users/Development/myFolder)."),
-		nls.localize('rootName', "`\${rootName}`: name of the workspace (e.g. myFolder or myWorkspace)."),
-		nls.localize('rootPath', "`\${rootPath}`: file path of the workspace (e.g. /Users/Development/myWorkspace)."),
+		nls.localize('rootName', "`\${rootName}`: name of the opened workspace or folder (e.g. myFolder or myWorkspace)."),
+		nls.localize('rootPath', "`\${rootPath}`: file path of the opened workspace or folder (e.g. /Users/Development/myWorkspace)."),
 		nls.localize('appName', "`\${appName}`: e.g. VS Code."),
 		nls.localize('remoteName', "`\${remoteName}`: e.g. SSH"),
 		nls.localize('dirty', "`\${dirty}`: a dirty indicator if the active editor is dirty."),
@@ -287,41 +358,67 @@ import { URI } from 'vs/base/common/uri';
 
 					const base = '${dirty}${activeEditorShort}${separator}${rootName}${separator}${appName}';
 					if (isWeb) {
-						return base + '${separator}${remoteName}'; // Web: always show remote indicator
+						return base + '${separator}${remoteName}'; // Web: always show remote name
 					}
 
 					return base;
 				})(),
 				'markdownDescription': windowTitleDescription
 			},
+			'window.titleSeparator': {
+				'type': 'string',
+				'default': isMacintosh ? ' — ' : ' - ',
+				'markdownDescription': nls.localize("window.titleSeparator", "Separator used by `window.title`.")
+			},
 			'window.menuBarVisibility': {
 				'type': 'string',
-				'enum': ['default', 'visible', 'toggle', 'hidden', 'compact'],
-				'enumDescriptions': [
-					nls.localize('window.menuBarVisibility.default', "Menu is only hidden in full screen mode."),
-					nls.localize('window.menuBarVisibility.visible', "Menu is always visible even in full screen mode."),
-					nls.localize('window.menuBarVisibility.toggle', "Menu is hidden but can be displayed via Alt key."),
+				'enum': ['classic', 'visible', 'toggle', 'hidden', 'compact'],
+				'markdownEnumDescriptions': [
+					nls.localize('window.menuBarVisibility.classic', "Menu is displayed at the top of the window and only hidden in full screen mode."),
+					nls.localize('window.menuBarVisibility.visible', "Menu is always visible at the top of the window even in full screen mode."),
+					isMacintosh ?
+						nls.localize('window.menuBarVisibility.toggle.mac', "Menu is hidden but can be displayed at the top of the window by executing the `Focus Application Menu` command.") :
+						nls.localize('window.menuBarVisibility.toggle', "Menu is hidden but can be displayed at the top of the window via the Alt key."),
 					nls.localize('window.menuBarVisibility.hidden', "Menu is always hidden."),
-					nls.localize('window.menuBarVisibility.compact', "Menu is displayed as a compact button in the sidebar. This value is ignored when 'window.titleBarStyle' is 'native'.")
+					nls.localize('window.menuBarVisibility.compact', "Menu is displayed as a compact button in the sidebar. This value is ignored when `#window.titleBarStyle#` is `native`.")
 				],
-				'default': isWeb ? 'compact' : 'default',
+				'default': isWeb ? 'compact' : 'classic',
 				'scope': ConfigurationScope.APPLICATION,
-				'description': nls.localize('menuBarVisibility', "Control the visibility of the menu bar. A setting of 'toggle' means that the menu bar is hidden and a single press of the Alt key will show it. By default, the menu bar will be visible, unless the window is full screen."),
+				'markdownDescription': isMacintosh ?
+					nls.localize('menuBarVisibility.mac', "Control the visibility of the menu bar. A setting of 'toggle' means that the menu bar is hidden and executing `Focus Application Menu` will show it. A setting of 'compact' will move the menu into the sidebar.") :
+					nls.localize('menuBarVisibility', "Control the visibility of the menu bar. A setting of 'toggle' means that the menu bar is hidden and a single press of the Alt key will show it. A setting of 'compact' will move the menu into the sidebar."),
 				'included': isWindows || isLinux || isWeb
 			},
 			'window.enableMenuBarMnemonics': {
 				'type': 'boolean',
-				'default': !isMacintosh,
+				'default': true,
 				'scope': ConfigurationScope.APPLICATION,
 				'description': nls.localize('enableMenuBarMnemonics', "Controls whether the main menus can be opened via Alt-key shortcuts. Disabling mnemonics allows to bind these Alt-key shortcuts to editor commands instead."),
-				'included': isWindows || isLinux || isWeb
+				'included': isWindows || isLinux
 			},
 			'window.customMenuBarAltFocus': {
 				'type': 'boolean',
-				'default': !isMacintosh,
+				'default': true,
 				'scope': ConfigurationScope.APPLICATION,
 				'markdownDescription': nls.localize('customMenuBarAltFocus', "Controls whether the menu bar will be focused by pressing the Alt-key. This setting has no effect on toggling the menu bar with the Alt-key."),
-				'included': isWindows || isLinux || isWeb
+				'included': isWindows || isLinux
+			},
+			'window.openFilesInNewWindow': {
+				'type': 'string',
+				'enum': ['on', 'off', 'default'],
+				'enumDescriptions': [
+					nls.localize('window.openFilesInNewWindow.on', "Files will open in a new window."),
+					nls.localize('window.openFilesInNewWindow.off', "Files will open in the window with the files' folder open or the last active window."),
+					isMacintosh ?
+						nls.localize('window.openFilesInNewWindow.defaultMac', "Files will open in the window with the files' folder open or the last active window unless opened via the Dock or from Finder.") :
+						nls.localize('window.openFilesInNewWindow.default', "Files will open in a new window unless picked from within the application (e.g. via the File menu).")
+				],
+				'default': 'off',
+				'scope': ConfigurationScope.APPLICATION,
+				'markdownDescription':
+					isMacintosh ?
+						nls.localize('openFilesInNewWindowMac', "Controls whether files should open in a new window. \nNote that there can still be cases where this setting is ignored (e.g. when using the `--new-window` or `--reuse-window` command line option).") :
+						nls.localize('openFilesInNewWindow', "Controls whether files should open in a new window.\nNote that there can still be cases where this setting is ignored (e.g. when using the `--new-window` or `--reuse-window` command line option).")
 			},
 			'window.openFoldersInNewWindow': {
 				'type': 'string',
@@ -334,6 +431,19 @@ import { URI } from 'vs/base/common/uri';
 				'default': 'default',
 				'scope': ConfigurationScope.APPLICATION,
 				'markdownDescription': nls.localize('openFoldersInNewWindow', "Controls whether folders should open in a new window or replace the last active window.\nNote that there can still be cases where this setting is ignored (e.g. when using the `--new-window` or `--reuse-window` command line option).")
+			},
+			'window.confirmBeforeClose': {
+				'type': 'string',
+				'enum': ['always', 'keyboardOnly', 'never'],
+				'enumDescriptions': [
+					nls.localize('window.confirmBeforeClose.always', "Always try to ask for confirmation. Note that browsers may still decide to close a tab or window without confirmation."),
+					nls.localize('window.confirmBeforeClose.keyboardOnly', "Only ask for confirmation if a keybinding was detected. Note that detection may not be possible in some cases."),
+					nls.localize('window.confirmBeforeClose.never', "Never explicitly ask for confirmation unless data loss is imminent.")
+				],
+				'default': isWeb && !isStandalone ? 'keyboardOnly' : 'never', // on by default in web, unless PWA
+				'description': nls.localize('confirmBeforeCloseWeb', "Controls whether to show a confirmation dialog before closing the browser tab or window. Note that even if enabled, browsers may still decide to close a tab or window without confirmation and that this setting is only a hint that may not work in all cases."),
+				'scope': ConfigurationScope.APPLICATION,
+				'included': isWeb
 			}
 		}
 	});
@@ -368,7 +478,7 @@ import { URI } from 'vs/base/common/uri';
 			'zenMode.hideActivityBar': {
 				'type': 'boolean',
 				'default': true,
-				'description': nls.localize('zenMode.hideActivityBar', "Controls whether turning on Zen Mode also hides the activity bar at the left of the workbench.")
+				'description': nls.localize('zenMode.hideActivityBar', "Controls whether turning on Zen Mode also hides the activity bar either at the left or right of the workbench.")
 			},
 			'zenMode.hideLineNumbers': {
 				'type': 'boolean',
@@ -377,7 +487,7 @@ import { URI } from 'vs/base/common/uri';
 			},
 			'zenMode.restore': {
 				'type': 'boolean',
-				'default': false,
+				'default': true,
 				'description': nls.localize('zenMode.restore', "Controls whether a window should restore to zen mode if it was exited in zen mode.")
 			},
 			'zenMode.silentNotifications': {
@@ -385,77 +495,6 @@ import { URI } from 'vs/base/common/uri';
 				'default': true,
 				'description': nls.localize('zenMode.silentNotifications', "Controls whether notifications are shown while in zen mode. If true, only error notifications will pop out.")
 			}
-		}
-	});
-})();
-
-// Viewlets & Panels
-(function registerViewletsAndPanels(): void {
-	const registerPanel = (viewContainer: ViewContainer): void => {
-		class PaneContainerPanel extends PaneCompositePanel {
-			constructor(
-				@ITelemetryService telemetryService: ITelemetryService,
-				@IStorageService storageService: IStorageService,
-				@IInstantiationService instantiationService: IInstantiationService,
-				@IThemeService themeService: IThemeService,
-				@IContextMenuService contextMenuService: IContextMenuService,
-				@IExtensionService extensionService: IExtensionService,
-				@IWorkspaceContextService contextService: IWorkspaceContextService
-			) {
-				super(viewContainer.id, (instantiationService as any).createInstance(viewContainer.ctorDescriptor!.ctor, ...(viewContainer.ctorDescriptor!.arguments || [])), telemetryService, storageService, instantiationService, themeService, contextMenuService, extensionService, contextService);
-			}
-		}
-		Registry.as<PanelRegistry>(PanelExtensions.Panels).registerPanel(PanelDescriptor.create(
-			PaneContainerPanel,
-			viewContainer.id,
-			viewContainer.name,
-			isString(viewContainer.icon) ? viewContainer.icon : undefined,
-			viewContainer.order,
-			viewContainer.focusCommand?.id,
-		));
-	};
-
-	const registerViewlet = (viewContainer: ViewContainer): void => {
-		class PaneContainerViewlet extends Viewlet {
-			constructor(
-				@IConfigurationService configurationService: IConfigurationService,
-				@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
-				@ITelemetryService telemetryService: ITelemetryService,
-				@IWorkspaceContextService contextService: IWorkspaceContextService,
-				@IStorageService storageService: IStorageService,
-				@IEditorService editorService: IEditorService,
-				@IInstantiationService instantiationService: IInstantiationService,
-				@IThemeService themeService: IThemeService,
-				@IContextMenuService contextMenuService: IContextMenuService,
-				@IExtensionService extensionService: IExtensionService
-			) {
-				super(viewContainer.id, (instantiationService as any).createInstance(viewContainer.ctorDescriptor!.ctor, ...(viewContainer.ctorDescriptor!.arguments || [])), telemetryService, storageService, instantiationService, themeService, contextMenuService, extensionService, contextService, layoutService, configurationService);
-			}
-		}
-		const viewletDescriptor = ViewletDescriptor.create(
-			PaneContainerViewlet,
-			viewContainer.id,
-			viewContainer.name,
-			isString(viewContainer.icon) ? viewContainer.icon : undefined,
-			viewContainer.order,
-			viewContainer.icon instanceof URI ? viewContainer.icon : undefined
-		);
-
-		Registry.as<ViewletRegistry>(ViewletExtensions.Viewlets).registerViewlet(viewletDescriptor);
-	};
-
-	const viewContainerRegistry = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry);
-	viewContainerRegistry.getViewContainers(ViewContainerLocation.Panel).forEach(viewContainer => registerPanel(viewContainer));
-	viewContainerRegistry.onDidRegister(({ viewContainer, viewContainerLocation }) => {
-		switch (viewContainerLocation) {
-			case ViewContainerLocation.Panel:
-				registerPanel(viewContainer);
-				return;
-			case ViewContainerLocation.Sidebar:
-				if (viewContainer.ctorDescriptor) {
-					registerViewlet(viewContainer);
-				}
-				return;
 		}
 	});
 })();
